@@ -1,0 +1,93 @@
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from tensorflow.keras import layers, models
+from tensorflow.keras.optimizers import Adam
+from sklearn.metrics import mean_squared_error
+
+data = {
+    'user_id': [1, 1, 2, 2, 3, 3, 4, 4, 5, 5],
+    'item_id': [101, 102, 101, 103, 102, 104, 103, 105, 104, 106],
+    'rating': [5, 4, 3, 5, 2, 4, 4, 3, 5, 2]
+}
+df = pd.DataFrame(data)
+
+num_users = df['user_id'].nunique()
+num_items = df['item_id'].nunique()
+
+user_ids = df['user_id'].unique().tolist()
+item_ids = df['item_id'].unique().tolist()
+
+user_id_map = {user_id: i for i, user_id in enumerate(user_ids)}
+item_id_map = {item_id: i for i, item_id in enumerate(item_ids)}
+
+df['user_index'] = df['user_id'].map(user_id_map)
+df['item_index'] = df['item_id'].map(item_id_map)
+
+train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
+
+user_train = train_df['user_index'].values
+item_train = train_df['item_index'].values
+rating_train = train_df['rating'].values
+
+user_test = test_df['user_index'].values
+item_test = test_df['item_index'].values
+rating_test = test_df['rating'].values
+
+embedding_dim = 50
+
+user_input = layers.Input(shape=(1,))
+user_embedding = layers.Embedding(num_users, embedding_dim)(user_input)
+user_vector = layers.Flatten()(user_embedding)
+
+item_input = layers.Input(shape=(1,))
+item_embedding = layers.Embedding(num_items, embedding_dim)(item_input)
+item_vector = layers.Flatten()(item_embedding)
+
+dot_product = layers.Dot(axes=1)([user_vector, item_vector])
+
+model = models.Model(inputs=[user_input, item_input], outputs=dot_product)
+
+model.compile(optimizer=Adam(learning_rate=0.001), loss='mean_squared_error')
+
+history = model.fit(
+    [user_train, item_train],
+    rating_train,
+    epochs=20,
+    validation_split=0.1,
+    verbose=0
+)
+
+predictions = model.predict([user_test, item_test])
+mse = mean_squared_error(rating_test, predictions)
+print(f'Mean Squared Error on Test Set: {mse:.4f}')
+
+def get_item_id(item_index):
+    for item, index in item_id_map.items():
+        if index == item_index:
+            return item
+    return None
+
+user_embedding_model = models.Model(inputs=user_input, outputs=user_vector)
+item_embedding_model = models.Model(inputs=item_input, outputs=item_vector)
+
+user_embeddings = user_embedding_model.predict(np.arange(num_users))
+item_embeddings = item_embedding_model.predict(np.arange(num_items))
+
+def get_top_n_recommendations(user_id, n=3):
+    user_index = user_id_map[user_id]
+    user_vector = user_embeddings[user_index]
+
+    predicted_ratings = np.dot(user_vector, item_embeddings.T)
+    top_item_indices = np.argsort(predicted_ratings)[::-1][:n]
+    recommended_item_ids = [get_item_id(index) for index in top_item_indices]
+
+    return recommended_item_ids
+
+user_id_to_recommend = 1
+top_recommendations = get_top_n_recommendations(user_id_to_recommend)
+print(f'\nTop 3 recommendations for user {user_id_to_recommend}: {top_recommendations}')
+
+user_id_to_recommend = 3
+top_recommendations = get_top_n_recommendations(user_id_to_recommend, n=2)
+print(f'Top 2 recommendations for user {user_id_to_recommend}: {top_recommendations}')
